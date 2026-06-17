@@ -14,4 +14,12 @@ const generateRefreshToken = () =>
 const hashToken = (token) =>
   crypto.createHash('sha256').update(token).digest('hex');
 
-module.exports = { generateAccessToken, generateRefreshToken, hashToken };
+const verifyToken = (token) => {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
+
+module.exports = { generateAccessToken, generateRefreshToken, hashToken, verifyToken };

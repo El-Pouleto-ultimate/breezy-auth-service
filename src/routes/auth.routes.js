@@ -40,4 +40,7 @@ router.post('/refresh',  ctrl.refresh);
 router.post('/logout',   ctrl.logout);
 router.get('/me', identity, ctrl.me);
 
+// Route interne — uniquement accessible depuis les services internes via INTERNAL_SECRET
+router.post('/internal/ban', ctrl.internalBan);
+
 module.exports = router;

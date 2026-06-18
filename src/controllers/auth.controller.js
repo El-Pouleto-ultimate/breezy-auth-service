@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/user.model');
 const RefreshToken = require('../models/refreshToken.model');
 const { generateAccessToken, generateRefreshToken, hashToken } = require('../utils/jwt.utils');
+const axios = require('axios');
 
 const BCRYPT_ROUNDS = Number.parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
 const REFRESH_TTL_MS = (Number.parseInt(process.env.REFRESH_TOKEN_DAYS, 10) || 7) * 24 * 60 * 60 * 1000;
@@ -29,6 +30,20 @@ exports.register = async (req, res) => {
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const user = await User.create({ username, email, password_hash });
 
+    // Sync avec user-service
+    try {
+      await axios.post(`${process.env.USER_SERVICE_URL}/users/sync`, {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      }, {
+        headers: { 'x-internal-secret': process.env.INTERNAL_SECRET },
+        timeout: 3000,
+      });
+    } catch (err) {
+      console.warn('[Auth] Sync user-service échoué (non critique):', err.message);
+    }
+
     const token = generateAccessToken(user);
     const refreshToken = generateRefreshToken();
 
@@ -39,7 +54,6 @@ exports.register = async (req, res) => {
       expires_at: expiresAt,
     });
 
-    // Set refresh token in HttpOnly cookie
     res.cookie('refreshToken', refreshToken, cookieOptions);
 
     return res.status(201).json({
@@ -66,6 +80,10 @@ exports.login = async (req, res) => {
       return res.status(403).json({ error: { code: 'ACCOUNT_BANNED', message: 'Votre compte a été suspendu.' } });
     }
 
+    if (!user.is_active) {
+      return res.status(403).json({ error: { code: 'ACCOUNT_INACTIVE', message: 'Votre compte est inactif.' } });
+    }
+
     const token = generateAccessToken(user);
     const refreshToken = generateRefreshToken();
 
@@ -76,7 +94,6 @@ exports.login = async (req, res) => {
       expires_at: expiresAt,
     });
 
-    // Set refresh token in HttpOnly cookie
     res.cookie('refreshToken', refreshToken, cookieOptions);
 
     return res.json({
@@ -91,7 +108,6 @@ exports.login = async (req, res) => {
 
 exports.refresh = async (req, res) => {
   try {
-    // Support token from cookie or body for backward compatibility
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
     if (!refreshToken) {
       return res.status(400).json({ error: { code: 'MISSING_TOKEN', message: 'Refresh token manquant.' } });
@@ -104,20 +120,17 @@ exports.refresh = async (req, res) => {
     });
 
     if (!stored) {
-      // Unknown token -> possible reuse or tampering
       res.clearCookie('refreshToken', cookieOptions);
       return res.status(401).json({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Session invalide.' } });
     }
 
     if (stored.is_revoked) {
-      // Token already revoked — revoke all tokens for this user as precaution
       await RefreshToken.update({ is_revoked: true }, { where: { user_id: stored.user_id } });
       res.clearCookie('refreshToken', cookieOptions);
       return res.status(401).json({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Session invalide.' } });
     }
 
     if (new Date() > stored.expires_at) {
-      // expired
       await stored.update({ is_revoked: true });
       res.clearCookie('refreshToken', cookieOptions);
       return res.status(401).json({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Session expirée.' } });
@@ -130,13 +143,11 @@ exports.refresh = async (req, res) => {
       return res.status(401).json({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Utilisateur invalide.' } });
     }
 
-    // Rotate: revoke old token, create a new one
     await stored.update({ is_revoked: true });
     const newRefreshToken = generateRefreshToken();
     const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
     await RefreshToken.create({ user_id: user.id, token_hash: hashToken(newRefreshToken), expires_at: expiresAt });
 
-    // Set new refresh token cookie
     res.cookie('refreshToken', newRefreshToken, cookieOptions);
 
     const newAccessToken = generateAccessToken(user);
@@ -163,15 +174,38 @@ exports.logout = async (req, res) => {
 
 exports.me = async (req, res) => {
   try {
-    const userId = req.userId; // injected by identity.middleware
+    const userId = req.userId;
     const user = await User.findByPk(userId, {
       attributes: ['id', 'username', 'email', 'role', 'is_active', 'is_banned'],
     });
-
     if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: 'Utilisateur non trouvé.' } });
     return res.json({ user });
   } catch (err) {
     console.error('[Auth] me error:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur.' } });
+  }
+};
+
+exports.internalBan = async (req, res) => {
+  try {
+    if (req.headers['x-internal-secret'] !== process.env.INTERNAL_SECRET) {
+      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Non autorisé.' } });
+    }
+
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: { code: 'MISSING_USER_ID', message: 'userId manquant.' } });
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: 'Utilisateur introuvable.' } });
+    }
+
+    await user.update({ is_banned: true });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[Auth] internalBan error:', err);
     return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur.' } });
   }
 };

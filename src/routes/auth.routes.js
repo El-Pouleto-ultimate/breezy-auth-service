@@ -42,6 +42,21 @@ router.post('/refresh',  ctrl.refresh);
 router.post('/logout',   ctrl.logout);
 router.get('/me', identity, ctrl.me);
 
+const changePasswordRules = [
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Mot de passe actuel requis.'),
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('Le mot de passe doit faire au moins 8 caractères.')
+    .matches(/(?=.*[A-Z])/)
+    .withMessage('Le mot de passe doit contenir au moins une majuscule.')
+    .matches(/(?=.*[0-9])/)
+    .withMessage('Le mot de passe doit contenir au moins un chiffre.'),
+];
+
+router.post('/change-password', identity, changePasswordRules, validate, ctrl.changePassword);
+
 // Route interne — uniquement accessible depuis les services internes via INTERNAL_SECRET
 router.post('/internal/ban', ctrl.internalBan);
 

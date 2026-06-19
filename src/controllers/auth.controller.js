@@ -195,6 +195,32 @@ exports.me = async (req, res) => {
   }
 };
 
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: 'Utilisateur non trouvé.' } });
+    }
+
+    const match = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: { code: 'INVALID_PASSWORD', message: 'Mot de passe actuel incorrect.' } });
+    }
+
+    const password_hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await user.update({ password_hash });
+
+    await RefreshToken.update({ is_revoked: true }, { where: { user_id: req.userId } });
+
+    return res.json({ message: 'Mot de passe modifié avec succès.' });
+  } catch (err) {
+    console.error('[Auth] changePassword error:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur.' } });
+  }
+};
+
 // Endpoint réservé aux services internes — protégé par INTERNAL_SECRET, pas par JWT
 exports.internalBan = async (req, res) => {
   try {

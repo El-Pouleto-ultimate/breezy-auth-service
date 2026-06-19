@@ -4,6 +4,7 @@ const validate = require('../middleware/validate.middleware');
 const ctrl = require('../controllers/auth.controller');
 const identity = require('../middleware/identity.middleware');
 
+// Règles de validation pour l'inscription
 const registerRules = [
   body('username')
     .trim()
@@ -24,6 +25,7 @@ const registerRules = [
     .withMessage('Le mot de passe doit contenir au moins un chiffre.'),
 ];
 
+// Règles de validation pour la connexion
 const loginRules = [
   body('email')
     .isEmail()

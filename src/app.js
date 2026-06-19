@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const app = express();
 
+// Arrêt immédiat si la clé JWT est absente — le service ne peut pas fonctionner sans elle
 if (!process.env.JWT_SECRET) {
   console.error('[auth-service] JWT_SECRET manquant. Arrêt...');
   process.exit(1);

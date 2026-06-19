@@ -4,8 +4,10 @@ const RefreshToken = require('../models/refreshToken.model');
 const { generateAccessToken, generateRefreshToken, hashToken } = require('../utils/jwt.utils');
 const axios = require('axios');
 
+// Lus une seule fois au démarrage pour éviter de relire l'env à chaque requête
 const BCRYPT_ROUNDS = Number.parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
 const REFRESH_TTL_MS = (Number.parseInt(process.env.REFRESH_TOKEN_DAYS, 10) || 7) * 24 * 60 * 60 * 1000;
+
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -13,6 +15,7 @@ const cookieOptions = {
   maxAge: REFRESH_TTL_MS,
 };
 
+// Crée le compte, synchronise le profil vers le user-service, puis retourne les tokens
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -30,7 +33,7 @@ exports.register = async (req, res) => {
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const user = await User.create({ username, email, password_hash });
 
-    // Sync avec user-service
+    // Non bloquant : si le user-service est indisponible, l'inscription reste valide
     try {
       await axios.post(`${process.env.USER_SERVICE_URL}/users/sync`, {
         id: user.id,
@@ -66,6 +69,7 @@ exports.register = async (req, res) => {
   }
 };
 
+// Vérifie les credentials et rejette immédiatement si le compte est banni ou inactif
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -106,6 +110,8 @@ exports.login = async (req, res) => {
   }
 };
 
+// Rotation du refresh token : l'ancien est révoqué et un nouveau est émis
+// Si le token présenté est déjà révoqué, tous les tokens du compte sont révoqués (détection de vol)
 exports.refresh = async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
@@ -125,6 +131,7 @@ exports.refresh = async (req, res) => {
     }
 
     if (stored.is_revoked) {
+      // Token déjà utilisé : possible vol de session, on révoque tout
       await RefreshToken.update({ is_revoked: true }, { where: { user_id: stored.user_id } });
       res.clearCookie('refreshToken', cookieOptions);
       return res.status(401).json({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Session invalide.' } });
@@ -158,6 +165,7 @@ exports.refresh = async (req, res) => {
   }
 };
 
+// Révoque le refresh token actif sans exiger d'authentification JWT
 exports.logout = async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
@@ -172,6 +180,7 @@ exports.logout = async (req, res) => {
   }
 };
 
+// Retourne les informations de l'utilisateur connecté (id fourni par le middleware identity)
 exports.me = async (req, res) => {
   try {
     const userId = req.userId;
@@ -186,6 +195,7 @@ exports.me = async (req, res) => {
   }
 };
 
+// Endpoint réservé aux services internes — protégé par INTERNAL_SECRET, pas par JWT
 exports.internalBan = async (req, res) => {
   try {
     if (req.headers['x-internal-secret'] !== process.env.INTERNAL_SECRET) {

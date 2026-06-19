@@ -1,6 +1,7 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
+// Représente un compte utilisateur avec ses credentials et son statut
 const User = sequelize.define('User', {
   id: {
     type: DataTypes.UUID,
@@ -21,6 +22,7 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
+  // user par défaut, moderator et admin pour la gestion de la modération
   role: {
     type: DataTypes.ENUM('user', 'moderator', 'admin'),
     defaultValue: 'user',

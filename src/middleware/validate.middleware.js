@@ -1,5 +1,7 @@
 const { validationResult } = require('express-validator');
 
+// Centralise la gestion des erreurs express-validator
+// À placer après les règles de validation dans la chaîne de middleware
 module.exports = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

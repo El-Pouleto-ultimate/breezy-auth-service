@@ -1,0 +1,82 @@
+# ==============================================================================
+# CI — Tests breezy-auth-service
+# ------------------------------------------------------------------------------
+# Ce workflow vérifie l'intégrité du service d'authentification à chaque push
+# ou pull request vers les branches actives du projet (main, dev).
+# ==============================================================================
+name: CI — Tests breezy-auth-service
+
+# ── Déclencheurs ───────────────────────────────────────────────────────────────
+# "push"         : chaque commit poussé directement sur la branche.
+# "pull_request" : chaque PR ouverte ou mise à jour (nouveau commit dans la PR).
+# Branches détectées dans ce dépôt : main + dev (origin/dev).
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    name: Jest · Node 20 · PostgreSQL 15
+    # Runner Linux éphémère fourni gratuitement par GitHub.
+    runs-on: ubuntu-latest
+
+    # ── Services annexes ────────────────────────────────────────────────────────
+    # Les tests appellent sequelize.authenticate() + sequelize.sync({ force: true })
+    # → ils ont besoin d'un vrai serveur PostgreSQL, pas d'un mock mémoire.
+    # GitHub Actions démarre ce conteneur avant les steps et attend qu'il soit
+    # "healthy" (pg_isready) avant de continuer.
+    services:
+      postgres:
+        image: postgres:15-alpine   # Même version majeure que dans docker-compose.yml
+        env:
+          POSTGRES_USER: auth_user
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: breezy_auth_test
+        ports:
+          # Expose le port 5432 du conteneur sur le port 5432 du runner Ubuntu →
+          # accessible depuis les steps via localhost:5432.
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auth_user -d breezy_auth_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # ── 1. Récupérer le code source ───────────────────────────────────────────
+      # actions/checkout clone le dépôt courant dans $GITHUB_WORKSPACE.
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      # ── 2. Configurer la version de Node.js ───────────────────────────────────
+      # ⚠  Aucun .nvmrc ni champ "engines" trouvé dans package.json →
+      #    Node 20 LTS utilisé par défaut (choix raisonné : LTS actif, compatible
+      #    avec jest ^30.4 et express ^5 déclarés dans les dépendances).
+      #    Si le projet fixe une version précise, créer un fichier .nvmrc à la
+      #    racine du dépôt (ex : "20.15.0") et retirer la valeur codée en dur ici.
+      # "cache: npm" met en cache ~/.npm entre les runs → npm ci plus rapide.
+      - name: Configurer Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── 3. Installer les dépendances de façon reproductible ───────────────────
+      # npm ci lit exactement package-lock.json et nettoie node_modules avant
+      # d'installer → résultat identique sur toutes les machines et tous les runs,
+      # contrairement à npm install qui peut résoudre des versions différentes.
+      - name: Installer les dépendances (npm ci)
+        run: npm ci
+
+      # ── 4. Lancer la suite de tests Jest ─────────────────────────────────────
+      # Commande lue depuis package.json → "jest --runInBand"
+      # --runInBand : exécution séquentielle (un seul worker) pour éviter les
+      #   conflits d'accès concurrents sur la base de données PostgreSQL.
+      # DATABASE_URL_TEST : surcharge l'URL par défaut définie dans auth.test.js
+      #   pour pointer vers le service postgres lancé dans ce même job CI.
+      - name: Exécuter les tests Jest
+        run: npm test
+        env:
+          DATABASE_URL_TEST: postgresql://auth_user:devpassword@localhost:5432/breezy_auth_test

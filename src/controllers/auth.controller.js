@@ -221,6 +221,117 @@ exports.changePassword = async (req, res) => {
   }
 };
 
+// Met à jour le username dans auth-service, synchronise vers user-service, retourne un nouveau JWT
+exports.updateUsername = async (req, res) => {
+  try {
+    const { newUsername } = req.body;
+    const userId = req.userId;
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: 'Utilisateur non trouvé.' } });
+    }
+
+    if (user.username === newUsername) {
+      return res.json({ user: { id: user.id, username: user.username, email: user.email, role: user.role } });
+    }
+
+    const taken = await User.findOne({ where: { username: newUsername } });
+    if (taken) {
+      return res.status(409).json({ error: { code: 'USERNAME_TAKEN', message: 'Ce nom d\'utilisateur est déjà pris.' } });
+    }
+
+    await user.update({ username: newUsername });
+
+    try {
+      await axios.post(`${process.env.USER_SERVICE_URL}/users/sync`, {
+        id: user.id,
+        username: newUsername,
+        role: user.role,
+      }, {
+        headers: { 'x-internal-secret': process.env.INTERNAL_SECRET },
+        timeout: 3000,
+      });
+    } catch (err) {
+      console.warn('[Auth] Sync username user-service échoué (non critique):', err.message);
+    }
+
+    // Nouveau JWT avec le username mis à jour
+    const token = generateAccessToken(user);
+    return res.json({
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+      token,
+    });
+  } catch (err) {
+    console.error('[Auth] updateUsername error:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur.' } });
+  }
+};
+
+// Réservé aux admins — crée un compte avec le rôle spécifié et synchronise vers le user-service
+exports.adminCreateUser = async (req, res) => {
+  try {
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Action réservée aux administrateurs.' } });
+    }
+
+    const { username, email, password, role } = req.body;
+
+    const validRoles = ['user', 'moderator', 'admin'];
+    if (!role || !validRoles.includes(role)) {
+      return res.status(400).json({ error: { code: 'INVALID_ROLE', message: 'Rôle invalide. Valeurs acceptées : user, moderator, admin.' } });
+    }
+
+    const emailTaken = await User.findOne({ where: { email } });
+    if (emailTaken) {
+      return res.status(409).json({ error: { code: 'EMAIL_TAKEN', message: 'Cet email est déjà utilisé.' } });
+    }
+
+    const usernameTaken = await User.findOne({ where: { username } });
+    if (usernameTaken) {
+      return res.status(409).json({ error: { code: 'USERNAME_TAKEN', message: 'Ce nom d\'utilisateur est déjà pris.' } });
+    }
+
+    const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = await User.create({ username, email, password_hash, role });
+
+    try {
+      await axios.post(`${process.env.USER_SERVICE_URL}/users/sync`, {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      }, {
+        headers: { 'x-internal-secret': process.env.INTERNAL_SECRET },
+        timeout: 3000,
+      });
+    } catch (err) {
+      console.warn('[Auth] Sync user-service échoué (non critique):', err.message);
+    }
+
+    return res.status(201).json({
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+    });
+  } catch (err) {
+    console.error('[Auth] adminCreateUser error:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur.' } });
+  }
+};
+
+// Endpoint interne — retourne le rôle réel d'un utilisateur (source de vérité)
+exports.internalGetRole = async (req, res) => {
+  try {
+    if (req.headers['x-internal-secret'] !== process.env.INTERNAL_SECRET) {
+      return res.status(401).json({ error: { code: 'UNAUTHORIZED' } });
+    }
+    const user = await User.findByPk(req.params.id, { attributes: ['id', 'role'] });
+    if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND' } });
+    return res.json({ role: user.role });
+  } catch (err) {
+    console.error('[Auth] internalGetRole error:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR' } });
+  }
+};
+
 // Endpoint réservé aux services internes — protégé par INTERNAL_SECRET, pas par JWT
 exports.internalBan = async (req, res) => {
   try {

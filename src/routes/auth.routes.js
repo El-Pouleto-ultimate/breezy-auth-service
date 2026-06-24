@@ -57,7 +57,43 @@ const changePasswordRules = [
 
 router.post('/change-password', identity, changePasswordRules, validate, ctrl.changePassword);
 
-// Route interne — uniquement accessible depuis les services internes via INTERNAL_SECRET
+const updateUsernameRules = [
+  body('newUsername')
+    .trim()
+    .isLength({ min: 3, max: 50 })
+    .withMessage('Le nom d\'utilisateur doit faire entre 3 et 50 caractères.')
+    .matches(/^[a-zA-Z0-9_]+$/)
+    .withMessage('Le nom d\'utilisateur ne peut contenir que des lettres, chiffres et underscores.'),
+];
+router.patch('/username', identity, updateUsernameRules, validate, ctrl.updateUsername);
+
+// Route admin — réservée aux administrateurs authentifiés
+const adminCreateUserRules = [
+  body('username')
+    .trim()
+    .isLength({ min: 3, max: 50 })
+    .withMessage('Le nom d\'utilisateur doit faire entre 3 et 50 caractères.')
+    .matches(/^[a-zA-Z0-9_]+$/)
+    .withMessage('Le nom d\'utilisateur ne peut contenir que des lettres, chiffres et underscores.'),
+  body('email')
+    .isEmail()
+    .withMessage('Email invalide.')
+    .normalizeEmail(),
+  body('password')
+    .isLength({ min: 8 })
+    .withMessage('Le mot de passe doit faire au moins 8 caractères.')
+    .matches(/(?=.*[A-Z])/)
+    .withMessage('Le mot de passe doit contenir au moins une majuscule.')
+    .matches(/(?=.*[0-9])/)
+    .withMessage('Le mot de passe doit contenir au moins un chiffre.'),
+  body('role')
+    .isIn(['user', 'moderator', 'admin'])
+    .withMessage('Rôle invalide.'),
+];
+router.post('/admin/create-user', identity, adminCreateUserRules, validate, ctrl.adminCreateUser);
+
+// Routes internes — uniquement accessibles depuis les services internes via INTERNAL_SECRET
 router.post('/internal/ban', ctrl.internalBan);
+router.get('/internal/users/:id/role', ctrl.internalGetRole);
 
 module.exports = router;

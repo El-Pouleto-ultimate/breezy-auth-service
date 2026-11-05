@@ -1,90 +1,53 @@
-# Breezy — Auth Service
+# Breezy: auth service
 
-Gère l'inscription, la connexion et les tokens JWT pour l'application Breezy.
+Accounts and authentication for [Breezy](https://github.com/El-Pouleto-ultimate/breezy-infra), a Twitter-like
+social network built as microservices: registration, login with JWT access tokens and rotating refresh sessions,
+password and username changes, admin account creation, and internal endpoints the other services use for bans
+and role lookups.
 
-## Ce que fait ce service
+Team project at CESI École d'Ingénieurs (distributed applications, June 2026).
 
-- Inscription / connexion des utilisateurs
-- Génération de tokens JWT (access token 15 min + refresh token 7 jours en cookie)
-- Révocation des tokens (logout)
-- Bannissement d'utilisateurs (endpoint interne, appelé par le user-service)
-- Synchronisation automatique du nouvel utilisateur vers le user-service à l'inscription
+Stack: Node.js 20, Express 5, Sequelize 6 on PostgreSQL, jsonwebtoken, bcryptjs, helmet, express-validator.
 
-## Variables d'environnement
+## API
 
-Copie `.env.example` en `.env` et remplis les valeurs :
+| Method | Path | Access |
+|---|---|---|
+| POST | `/auth/register` | public |
+| POST | `/auth/login` | public |
+| POST | `/auth/refresh` | public |
+| POST | `/auth/logout` | public |
+| GET | `/auth/me` | signed in |
+| POST | `/auth/change-password` | signed in |
+| PATCH | `/auth/username` | signed in |
+| POST | `/auth/admin/create-user` | admin |
+| POST | `/auth/internal/ban` | internal |
+| GET | `/auth/internal/users/:id/role` | internal |
+| GET | `/health` | public |
 
-```bash
-cp .env.example .env
-```
+"Signed in" routes read the `x-user-id` and `x-user-role` headers that the gateway sets once it has checked the
+JWT. "Internal" routes require the `x-internal-secret` header shared by the services.
 
-| Variable | Description |
-|---|---|
-| `PORT` | Port d'écoute (défaut : 3001) |
-| `DATABASE_URL` | URL de connexion PostgreSQL |
-| `JWT_SECRET` | Clé secrète pour signer les tokens JWT |
-| `JWT_EXPIRES_IN` | Durée de vie de l'access token (ex : `15m`) |
-| `REFRESH_TOKEN_DAYS` | Durée de vie du refresh token en jours (défaut : 7) |
-| `BCRYPT_ROUNDS` | Nombre de rounds bcrypt pour le hash des mots de passe (défaut : 12) |
-| `INTERNAL_SECRET` | Secret partagé pour les appels entre services |
-| `USER_SERVICE_URL` | URL du user-service |
+## Configuration
 
-> `INTERNAL_SECRET` doit avoir la même valeur dans tous les services.
+Copy `.env.example` to `.env`. Variables: `PORT`, `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`,
+`REFRESH_TOKEN_DAYS`, `BCRYPT_ROUNDS`, `INTERNAL_SECRET`, `USER_SERVICE_URL`, `CORS_ORIGIN`.
 
-## Lancer en développement
+## Run and test
+
+The whole stack runs with Docker Compose from [breezy-infra](https://github.com/El-Pouleto-ultimate/breezy-infra).
+On its own:
 
 ```bash
 npm install
-npm run dev
+npm run dev     # or: npm start
+npm test        # 13 integration tests (Jest + supertest) against PostgreSQL
 ```
 
-Le service tourne sur `http://localhost:3001`.
+GitHub Actions runs the tests against PostgreSQL 15 on every push and pull request
+([`ci.yml`](.github/workflows/ci.yml)).
 
-## Lancer les tests
+## Team
 
-Assure-toi d'avoir une base PostgreSQL de test (`breezy_auth_test`) accessible, puis :
-
-```bash
-npm test
-```
-
-Les tests utilisent `DATABASE_URL_TEST` si défini, sinon ils se connectent à `localhost:5432/breezy_auth_test`.
-
-## Lancer avec Docker
-
-```bash
-docker build -t breezy-auth .
-docker run -p 3001:3001 --env-file .env breezy-auth
-```
-
-## Endpoints
-
-| Méthode | Route | Description |
-|---|---|---|
-| `POST` | `/auth/register` | Inscription |
-| `POST` | `/auth/login` | Connexion |
-| `POST` | `/auth/refresh` | Renouveler l'access token |
-| `POST` | `/auth/logout` | Déconnexion |
-| `GET` | `/auth/me` | Infos de l'utilisateur connecté |
-| `POST` | `/auth/internal/ban` | Bannir un utilisateur (interne uniquement) |
-| `GET` | `/health` | Vérification que le service est up |
-
-### Validation à l'inscription
-
-- `username` : 3 à 50 caractères, lettres/chiffres/underscore uniquement
-- `email` : format email valide
-- `password` : minimum 8 caractères, au moins 1 majuscule et 1 chiffre
-
-## Structure du projet
-
-```
-src/
-├── config/       # Connexion base de données (Sequelize)
-├── controllers/  # Logique métier
-├── middleware/   # Validation et identité
-├── models/       # Modèles Sequelize (User, RefreshToken)
-├── routes/       # Définition des routes
-└── utils/        # Utilitaires JWT
-tests/
-└── auth.test.js  # Tests d'intégration
-```
+[Estebge](https://github.com/Estebge), [haguetm](https://github.com/haguetm),
+[Jessica14112005](https://github.com/Jessica14112005), [Tuture57](https://github.com/Tuture57).
